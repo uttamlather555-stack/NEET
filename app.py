@@ -9,12 +9,14 @@ from auth import render_login_signup
 from admin_dashboard import render_admin_dashboard
 from student_dashboard import render_student_dashboard
 
-# Setup and CSS inject
-setup_page()
-inject_css()
-
 @ui.page('/')
 def main_page():
+    # ---------------- PAGE SETUP ----------------
+    # These must be inside the page function so NiceGUI knows 
+    # they belong to this specific route, not the global scope.
+    setup_page()
+    inject_css()
+
     # ---------------- LOAD + TOUCH PRESENCE ----------------
     try:
         db = load_db()
@@ -61,5 +63,5 @@ if __name__ in {"__main__", "__mp_main__"}:
     ui.run(
         host='0.0.0.0', 
         port=port, 
-        storage_secret='super_secret_key_change_me' # IMPORTANT: Change this to a random string!
+        storage_secret='super_secret_key_change_me' # IMPORTANT: Change this to a random, secure string for production!
     )
