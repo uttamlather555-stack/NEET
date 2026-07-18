@@ -8,19 +8,21 @@ from quiz import (
     submit_full_test, full_test_time_left,
     render_full_test_leaderboard,
 )
-from sidebar import render_nav, render_roster
+from sidebar import render_sidebar
 
+
+def render_student_dashboard(db):
+    # 1. Render layout safely outside refreshable container
+    render_sidebar(admin=False, db=db, on_navigate=lambda: student_content.refresh(db))
+
+    # 2. Render dynamic content
+    student_content(db)
 
 @ui.refreshable
-def render_student_dashboard(db):
+def student_content(db):
     username = app.storage.user.get("username", "")
+    page = app.storage.user.get("nav_page", "Tests")
     
-    # Setup drawer and navigation logic
-    # Passing render_student_dashboard.refresh as the callback so clicks redraw the main view
-    page = render_nav(admin=False, on_navigate=lambda: render_student_dashboard.refresh(db))
-    render_roster(db)
-
-    # Main content area
     with ui.column().classes('w-full max-w-5xl mx-auto p-4'):
         ui.html("<h1>Dashboard</h1>")
 
@@ -45,10 +47,9 @@ def _render_tests_page(db, username):
 
     type_choice = ui.radio(["Tests", "DPPs"], value=app.storage.user.get("student_test_type_filter", "Tests")).props('inline')
     
-    # Store filter choice and refresh when it changes
     def on_filter_change(e):
         app.storage.user["student_test_type_filter"] = e.value
-        render_student_dashboard.refresh(db)
+        student_content.refresh(db)
         
     type_choice.on_value_change(on_filter_change)
 
@@ -98,7 +99,7 @@ def _render_available_card(db, test_id, test, username, wanted_type):
 
         button_label = "Retake" if best is not None else "Start"
         ui.button(f"{button_label} {'Test' if wanted_type == 'test' else 'DPP'}", 
-                  on_click=lambda: [start_full_test_attempt(db, test_id, username), render_student_dashboard.refresh(db)]).props('color=primary').classes('mt-2')
+                  on_click=lambda: [start_full_test_attempt(db, test_id, username), student_content.refresh(db)]).props('color=primary').classes('mt-2')
 
 
 def _render_past_card(db, test_id, test, username, wanted_type):
@@ -120,7 +121,7 @@ def _render_past_card(db, test_id, test, username, wanted_type):
             ui.label("You haven't attempted this one yet.").classes('text-sm text-gray-500')
 
         ui.button(f"{'Retake' if best is not None else 'Attempt'} anytime", 
-                  on_click=lambda: [start_full_test_attempt(db, test_id, username), render_student_dashboard.refresh(db)]).classes('mt-4')
+                  on_click=lambda: [start_full_test_attempt(db, test_id, username), student_content.refresh(db)]).classes('mt-4')
 
 
 def _render_test_review(test, best):
@@ -172,8 +173,7 @@ def _render_test_taking_ui(db, test_id, test, username):
         app.storage.user.pop(f"working_{test_id}", None)
         ui.notify("Time's up - your attempt has been auto-submitted.", type="warning")
         
-        # Short delay before refreshing to show dashboard
-        ui.timer(1.5, lambda: render_student_dashboard.refresh(db), once=True)
+        ui.timer(1.5, lambda: student_content.refresh(db), once=True)
         return
 
     working = _get_working_copy(sub, test_id)
@@ -183,14 +183,12 @@ def _render_test_taking_ui(db, test_id, test, username):
         app.storage.user[qidx_key] = 0
     current_idx = app.storage.user[qidx_key]
 
-    # Set up background autosave (runs every 20s as long as this UI is active)
     ui.timer(20.0, lambda: _flush_working_copy(db, test_id, username))
 
     answered_count = len(working["answers"])
     marked_count = len(working["marked_for_review"])
     unattempted_count = total - answered_count
 
-    # Container for the top exam bar to allow dynamic clock updates
     exam_bar_container = ui.row().classes('w-full')
     
     def render_exam_bar():
@@ -203,12 +201,11 @@ def _render_test_taking_ui(db, test_id, test, username):
                 clock_class = "exam-bar-clock urgent" if urgent else "exam-bar-clock"
                 clock_html = f'<div class="{clock_class}">{mins:02d}:{secs:02d}</div>'
                 
-                # Auto-submit if time runs out while sitting on a question
                 if curr_remaining <= 0:
                     _flush_working_copy(db, test_id, username)
                     submit_full_test(db, test_id, username)
                     app.storage.user.pop(f"working_{test_id}", None)
-                    render_student_dashboard.refresh(db)
+                    student_content.refresh(db)
             else:
                 clock_html = '<div class="exam-bar-clock">Untimed</div>'
 
@@ -228,7 +225,6 @@ def _render_test_taking_ui(db, test_id, test, username):
             
     render_exam_bar()
     
-    # Tick the clock every second without redrawing the rest of the UI
     if remaining is not None:
         ui.timer(1.0, render_exam_bar)
 
@@ -236,8 +232,6 @@ def _render_test_taking_ui(db, test_id, test, username):
         ui.label("This test's live window has ended, but you're free to practice it now — self-paced, no clock, doesn't affect anyone else's result.").classes('text-sm text-gray-500 mb-4')
 
     with ui.row().classes('w-full gap-8 flex-nowrap'):
-        
-        # MAIN QUESTION COLUMN
         with ui.column().classes('flex-grow w-3/4'):
             q = questions[current_idx]
             ui.label(f"Question {current_idx + 1} of {total}").classes('text-sm text-gray-500')
@@ -245,7 +239,6 @@ def _render_test_taking_ui(db, test_id, test, username):
 
             existing_answer = working["answers"].get(str(current_idx))
             
-            # Update the local dictionary memory instantly on click
             def on_choice_change(e):
                 if e.value is not None:
                     working["answers"][str(current_idx)] = e.value
@@ -261,13 +254,13 @@ def _render_test_taking_ui(db, test_id, test, username):
                         working["marked_for_review"].remove(current_idx)
                     else:
                         working["marked_for_review"].append(current_idx)
-                    navigate_test(db, test_id, username, current_idx) # just flush and refresh
+                    navigate_test(db, test_id, username, current_idx)
 
                 ui.button("Unmark" if is_marked else "Mark for Review", on_click=toggle_mark).props('outline color=warning').classes('flex-1')
                 
                 def clear_answer():
                     working["answers"].pop(str(current_idx), None)
-                    choice.value = None # Clear radio UI
+                    choice.value = None
                     navigate_test(db, test_id, username, current_idx)
                     
                 ui.button("Clear Answer", on_click=clear_answer).props('outline color=negative').classes('flex-1').set_visibility(existing_answer is not None)
@@ -276,11 +269,10 @@ def _render_test_taking_ui(db, test_id, test, username):
 
             ui.separator().classes('my-8')
             
-            # Submit Section
             submit_container = ui.column().classes('w-full')
             with submit_container:
                 if not app.storage.user.get(f"confirm_submit_{test_id}"):
-                    ui.button("Submit Exam", on_click=lambda: [app.storage.user.update({f"confirm_submit_{test_id}": True}), render_student_dashboard.refresh(db)]).props('color=primary').classes('w-full')
+                    ui.button("Submit Exam", on_click=lambda: [app.storage.user.update({f"confirm_submit_{test_id}": True}), student_content.refresh(db)]).props('color=primary').classes('w-full')
                 else:
                     ui.notify(f"You've answered {answered_count} of {total} questions. Submit anyway?", type="warning")
                     with ui.row().classes('w-full gap-4 mt-2'):
@@ -290,12 +282,11 @@ def _render_test_taking_ui(db, test_id, test, username):
                             app.storage.user.pop(f"confirm_submit_{test_id}", None)
                             app.storage.user.pop(f"working_{test_id}", None)
                             app.storage.user.pop(qidx_key, None)
-                            render_student_dashboard.refresh(db)
+                            student_content.refresh(db)
                             
                         ui.button("Yes, Submit Now", on_click=final_submit).props('color=primary').classes('flex-1')
-                        ui.button("Keep Working", on_click=lambda: [app.storage.user.pop(f"confirm_submit_{test_id}", None), render_student_dashboard.refresh(db)]).classes('flex-1')
+                        ui.button("Keep Working", on_click=lambda: [app.storage.user.pop(f"confirm_submit_{test_id}", None), student_content.refresh(db)]).classes('flex-1')
 
-        # PALETTE COLUMN
         with ui.column().classes('w-1/4 min-w-[200px]'):
             ui.label("Question Palette").classes('text-sm text-gray-500 mb-2')
             
@@ -320,14 +311,12 @@ def _render_test_taking_ui(db, test_id, test, username):
                         
                     ui.button(label, on_click=lambda i=idx: navigate_test(db, test_id, username, i)).props(f'color={color} outline size=sm').classes('w-10 h-10 p-0')
 
+
 def navigate_test(db, test_id, username, new_idx):
     _flush_working_copy(db, test_id, username)
     app.storage.user[f"qidx_{test_id}"] = new_idx
-    render_student_dashboard.refresh(db)
+    student_content.refresh(db)
 
-# ========================================================================
-# LIVE QUIZ 
-# ========================================================================
 
 def _render_live_quiz_view(db, username):
     ui.label("Live Practice").classes('text-xl font-bold mt-4')
@@ -339,7 +328,6 @@ def _render_live_quiz_view(db, username):
     qs = db["quiz_state"]
     q_data = qs["question_data"]
 
-    # Safe escape is natively handled by ui.html if needed, but we use strict wrappers
     safe_question = html_lib.escape(str(q_data["question"]))
     
     badges_html = ""
@@ -368,10 +356,9 @@ def _render_live_quiz_view(db, username):
             ui.label("Time's up. Waiting for instructor...").classes('mt-4 text-orange-500 font-bold')
         else:
             choice = ui.radio(q_data["options"]).classes('mt-4 text-lg')
-            ui.button("Submit Answer", on_click=lambda: [submit_answer(db, username, choice.value), render_student_dashboard.refresh(db)] if choice.value else ui.notify("Select an answer first", type="warning")).props('color=primary').classes('mt-4')
+            ui.button("Submit Answer", on_click=lambda: [submit_answer(db, username, choice.value), student_content.refresh(db)] if choice.value else ui.notify("Select an answer first", type="warning")).props('color=primary').classes('mt-4')
             
-            # Background checker to auto-refresh student view when admin reveals answer
-            ui.timer(1.0, lambda: render_student_dashboard.refresh(db) if qs.get("timer_seconds") and is_time_up(db) else None)
+            ui.timer(1.0, lambda: student_content.refresh(db) if qs.get("timer_seconds") and is_time_up(db) else None)
     else:
         correct = qs["answers"].get(username) == q_data["answer"]
         box_class = "reveal-box" if correct else "reveal-box wrong"
