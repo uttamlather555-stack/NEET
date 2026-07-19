@@ -17,25 +17,37 @@ from chapters import SUBJECTS, get_chapters
 from config import DEFAULT_TEST_DURATION_MINUTES, DEFAULT_TEST_QUESTION_COUNT, DEFAULT_MARKS_CORRECT, DEFAULT_MARKS_WRONG, DIFFICULTY_LEVELS
 
 
+_PAGE_SUBTITLES = {
+    "Tests": "Build, launch, and monitor full-length tests and DPPs.",
+    "Live Quiz": "Run a live question with everyone watching in real time.",
+    "Leaderboard": "Track today's session standings across the class.",
+}
+
+
 def render_admin_dashboard(db):
-    # 1. Render layout strictly OUTSIDE of refreshable container
     render_sidebar(admin=True, db=db, on_navigate=lambda: admin_content.refresh(db))
-    
-    # 2. Render dynamic content
     admin_content(db)
+
 
 @ui.refreshable
 def admin_content(db):
     page = app.storage.user.get("nav_page", "Tests")
-    
-    with ui.column().classes('w-full max-w-5xl mx-auto p-4'):
-        if not has_any_keys_configured():
-            ui.notify(
-                "No AI provider keys are configured yet. Add GROQ_API_KEYS and/or GEMINI_API_KEYS "
-                "to your .env file to generate questions.", type="warning"
-            )
 
-        ui.html("<h1>Admin Console</h1>")
+    with ui.column().classes('w-full max-w-5xl mx-auto p-4 md:p-8'):
+        if not has_any_keys_configured():
+            with ui.row().classes('key-warning-banner w-full items-center gap-3 mb-4'):
+                ui.icon('warning').classes('text-xl')
+                ui.label(
+                    "No AI provider keys configured yet — add GROQ_API_KEYS and/or "
+                    "GEMINI_API_KEYS to your .env file to generate questions."
+                ).classes('text-sm')
+
+        ui.html(
+            f'<div class="page-header">'
+            f'<div class="page-title">Admin Console</div>'
+            f'<div class="page-subtitle">{_PAGE_SUBTITLES.get(page, "")}</div>'
+            f'</div>'
+        )
 
         if page == "Tests":
             _render_full_test_builder(db)
@@ -46,30 +58,39 @@ def admin_content(db):
 
 
 def _render_full_test_builder(db):
-    ui.label("Tests & DPPs").classes('text-2xl font-bold')
+    ui.label("Tests & DPPs").classes('section-title')
     ui.label(
-        "The complete question set is generated up front, before students can attempt it... "
-        "only their best score counts."
-    ).classes('text-sm text-gray-500 mb-4')
+        "The complete question set is generated up front, before students can attempt it. "
+        "Only their best score counts toward the leaderboard."
+    ).classes('section-caption mb-4')
 
-    with ui.tabs() as tabs:
+    with ui.tabs().classes('app-tabs') as tabs:
         tab_new = ui.tab("Create New")
         tab_manage = ui.tab("Manage Existing")
-    
+
     with ui.tab_panels(tabs, value=tab_new).classes('w-full bg-transparent'):
-        with ui.tab_panel(tab_new):
+        with ui.tab_panel(tab_new).classes('p-0 pt-4'):
             _render_new_test_form(db)
-        with ui.tab_panel(tab_manage):
+        with ui.tab_panel(tab_manage).classes('p-0 pt-4'):
             _render_existing_tests(db)
 
 
+def _form_section(title_text: str, caption_text: str = None):
+    """A small labeled divider used to break the builder form into readable groups."""
+    with ui.column().classes('form-section-header w-full'):
+        ui.label(title_text).classes('form-section-title')
+        if caption_text:
+            ui.label(caption_text).classes('form-section-caption')
+
+
 def _render_new_test_form(db):
-    with ui.card().classes('w-full p-4'):
+    with ui.card().classes('builder-card w-full p-6'):
+        _form_section("Type")
         test_type = ui.radio(
-            ["test", "dpp"], 
+            ["test", "dpp"],
             value="test"
-        ).props('inline')
-        
+        ).props('inline').classes('mb-4')
+
         def update_labels():
             is_dpp = test_type.value == "dpp"
             title.placeholder = "e.g. DPP — Thermodynamics, 20 July" if is_dpp else "e.g. NEET Full Syllabus Mock #3"
@@ -85,27 +106,29 @@ def _render_new_test_form(db):
 
         test_type.on_value_change(update_labels)
 
-        title = ui.input("Title", placeholder="e.g. NEET Full Syllabus Mock #3").classes('w-full mb-4')
-        scope = ui.radio(["Single Chapter", "Multiple Chapters", "Full Subject", "Full Syllabus (all subjects)"], value="Single Chapter").props('inline')
+        title = ui.input("Title", placeholder="e.g. NEET Full Syllabus Mock #3").classes('w-full mb-6')
 
-        scope_single = ui.row().classes('w-full gap-4')
+        _form_section("Scope", "How much of the syllabus should this cover?")
+        scope = ui.radio(["Single Chapter", "Multiple Chapters", "Full Subject", "Full Syllabus (all subjects)"], value="Single Chapter").props('inline').classes('mb-3')
+
+        scope_single = ui.row().classes('w-full gap-4 mb-4')
         with scope_single:
-            subj_single = ui.select(SUBJECTS, value=SUBJECTS[0], label="Subject")
-            chap_single = ui.select(get_chapters(SUBJECTS[0]), value=get_chapters(SUBJECTS[0])[0], label="Chapter")
+            subj_single = ui.select(SUBJECTS, value=SUBJECTS[0], label="Subject").classes('flex-1')
+            chap_single = ui.select(get_chapters(SUBJECTS[0]), value=get_chapters(SUBJECTS[0])[0], label="Chapter").classes('flex-1')
             subj_single.on_value_change(lambda e: chap_single.set_options(get_chapters(e.value)))
 
-        scope_multi = ui.row().classes('w-full gap-4').style('display: none;')
+        scope_multi = ui.row().classes('w-full gap-4 mb-4').style('display: none;')
         with scope_multi:
-            subj_multi = ui.select(SUBJECTS, value=SUBJECTS[0], label="Subject")
-            chap_multi = ui.select(get_chapters(SUBJECTS[0]), label="Chapters", multiple=True).classes('min-w-[200px]')
+            subj_multi = ui.select(SUBJECTS, value=SUBJECTS[0], label="Subject").classes('flex-1')
+            chap_multi = ui.select(get_chapters(SUBJECTS[0]), label="Chapters", multiple=True).classes('flex-1 min-w-[200px]')
             subj_multi.on_value_change(lambda e: chap_multi.set_options(get_chapters(e.value)))
 
-        scope_full_subj = ui.row().classes('w-full gap-4').style('display: none;')
+        scope_full_subj = ui.row().classes('w-full gap-4 mb-4').style('display: none;')
         with scope_full_subj:
-            subj_full = ui.select(SUBJECTS, value=SUBJECTS[0], label="Subject")
-            ui.label().bind_text_from(subj_full, 'value', backward=lambda v: f"Covers all chapters of {v}.").classes('text-gray-500 self-center')
+            subj_full = ui.select(SUBJECTS, value=SUBJECTS[0], label="Subject").classes('flex-1')
+            ui.label().bind_text_from(subj_full, 'value', backward=lambda v: f"Covers all chapters of {v}.").classes('text-dim self-center')
 
-        scope_full_syl = ui.label("Covers all chapters across all subjects.").classes('text-gray-500 mb-4').style('display: none;')
+        scope_full_syl = ui.label("Covers all chapters across all subjects.").classes('text-dim mb-4').style('display: none;')
 
         def update_scope_visibility():
             v = scope.value
@@ -113,33 +136,36 @@ def _render_new_test_form(db):
             scope_multi.style('display: flex;' if v == 'Multiple Chapters' else 'display: none;')
             scope_full_subj.style('display: flex;' if v == 'Full Subject' else 'display: none;')
             scope_full_syl.style('display: block;' if v == 'Full Syllabus (all subjects)' else 'display: none;')
-        
+
         scope.on_value_change(update_scope_visibility)
 
-        with ui.row().classes('w-full gap-4 my-4'):
-            difficulty = ui.select(DIFFICULTY_LEVELS, value=DIFFICULTY_LEVELS[1], label="Difficulty")
-            pyq_style = ui.checkbox("PYQ-style phrasing").tooltip("Write questions in the style of actual NEET PYQs.")
+        _form_section("Question style")
+        with ui.row().classes('w-full gap-4 mb-6'):
+            difficulty = ui.select(DIFFICULTY_LEVELS, value=DIFFICULTY_LEVELS[1], label="Difficulty").classes('flex-1')
+            with ui.row().classes('items-center flex-1'):
+                pyq_style = ui.checkbox("PYQ-style phrasing").tooltip("Write questions in the style of actual NEET PYQs.")
 
-        with ui.row().classes('w-full gap-4 my-4'):
-            q_count = ui.number("Number of questions", value=DEFAULT_TEST_QUESTION_COUNT, step=1)
-            col_dur = ui.row()
+        _form_section("Structure")
+        with ui.row().classes('w-full gap-4 mb-2'):
+            q_count = ui.number("Number of questions", value=DEFAULT_TEST_QUESTION_COUNT, step=1).classes('flex-1')
+            col_dur = ui.row().classes('flex-1')
             with col_dur:
-                duration = ui.number("Duration (minutes)", value=DEFAULT_TEST_DURATION_MINUTES, step=10)
-        
-        dpp_caption = ui.label("DPPs are untimed — no shared clock, students can work through it at their own pace.").classes('text-sm text-gray-500')
+                duration = ui.number("Duration (minutes)", value=DEFAULT_TEST_DURATION_MINUTES, step=10).classes('w-full')
+
+        dpp_caption = ui.label("DPPs are untimed — no shared clock, students can work through it at their own pace.").classes('text-dim text-sm mb-4')
         dpp_caption.set_visibility(False)
 
-        with ui.row().classes('w-full gap-4 my-4'):
-            marks_correct = ui.number("Marks per correct answer", value=float(DEFAULT_MARKS_CORRECT), step=0.5)
-            marks_wrong = ui.number("Marks per wrong answer (negative marking)", value=float(DEFAULT_MARKS_WRONG), step=0.5)
+        with ui.row().classes('w-full gap-4 mb-2'):
+            marks_correct = ui.number("Marks per correct answer", value=float(DEFAULT_MARKS_CORRECT), step=0.5).classes('flex-1')
+            marks_wrong = ui.number("Marks per wrong answer (negative marking)", value=float(DEFAULT_MARKS_WRONG), step=0.5).classes('flex-1')
 
-        ui.separator().classes('my-4')
+        ui.separator().classes('my-6')
         
-        def handle_generate():
+        async def handle_generate():
             if not title.value.strip():
                 ui.notify("Title is required", type="warning")
                 return
-            
+
             chapter_pairs = []
             if scope.value == "Single Chapter":
                 chapter_pairs = [(subj_single.value, chap_single.value)]
@@ -153,12 +179,25 @@ def _render_new_test_form(db):
             else:
                 chapter_pairs = [(subj, ch) for subj in SUBJECTS for ch in get_chapters(subj)]
 
-            _generate_full_test(db, title.value.strip(), chapter_pairs, int(q_count.value),
-                                 int(duration.value) if test_type.value == 'test' else 0, 
-                                 difficulty.value, pyq_style.value,
-                                 marks_correct.value, marks_wrong.value, test_type.value)
+            btn_generate.disable()
+            btn_generate.props('loading')
+            try:
+                await _generate_full_test(
+                    db, title.value.strip(), chapter_pairs, int(q_count.value),
+                    int(duration.value) if test_type.value == 'test' else 0,
+                    difficulty.value, pyq_style.value,
+                    marks_correct.value, marks_wrong.value, test_type.value,
+                )
+            finally:
+                # The whole tab is refreshed on success/failure by _generate_full_test,
+                # but guard here in case this widget instance is still alive.
+                try:
+                    btn_generate.props(remove='loading')
+                    btn_generate.enable()
+                except Exception:
+                    pass
 
-        btn_generate = ui.button("Generate Test", on_click=handle_generate).props('color=primary')
+        btn_generate = ui.button("Generate Test", on_click=handle_generate, icon="auto_awesome").props('color=primary').classes('generate-btn')
 
 
 async def _generate_full_test(db, title, chapter_pairs, question_count, duration_minutes,
@@ -209,16 +248,23 @@ async def _generate_full_test(db, title, chapter_pairs, question_count, duration
     admin_content.refresh(db)
 
 
+_STATUS_META = {
+    "draft": ("Draft", "status-pill draft"),
+    "open": ("Open", "status-pill open"),
+    "closed": ("Closed", "status-pill closed"),
+}
+
+
 @ui.refreshable
 def _render_existing_tests(db):
     tests = db.get("full_tests", {})
     if not tests:
-        ui.label("Nothing created yet.").classes('text-gray-500')
+        ui.label("Nothing created yet.").classes('empty-state')
         return
 
-    filter_choice = ui.radio(["All", "Tests", "DPPs"], value="All").props('inline')
-    list_container = ui.column().classes('w-full mt-4')
-    
+    filter_choice = ui.radio(["All", "Tests", "DPPs"], value="All").props('inline').classes('mb-2')
+    list_container = ui.column().classes('w-full mt-4 gap-3')
+
     def render_list():
         list_container.clear()
         with list_container:
@@ -230,40 +276,44 @@ def _render_existing_tests(db):
                 filtered_tests = {tid: t for tid, t in tests.items() if t.get("test_type") == "dpp"}
 
             if not filtered_tests:
-                ui.label("Nothing here yet.").classes('text-gray-500')
+                ui.label("Nothing here yet.").classes('empty-state')
                 return
 
             for test_id, test in sorted(filtered_tests.items(), key=lambda kv: kv[1]["created_at"], reverse=True):
                 is_dpp = test.get("test_type") == "dpp"
-                with ui.card().classes('w-full p-4 mb-2'):
-                    status_label = {"draft": "Draft", "open": "Open", "closed": "Closed"}[test["status"]]
-                    type_label = "DPP" if is_dpp else "Test"
-                    duration_label = "untimed" if is_dpp else f"{test['duration_minutes']} min"
-                    
-                    ui.markdown(f"**{test['title']}** · *{type_label}* — {len(test['questions'])} questions, {duration_label} — *{status_label}*")
+                status_text, status_class = _STATUS_META[test["status"]]
+                type_label = "DPP" if is_dpp else "Test"
+                duration_label = "Untimed" if is_dpp else f"{test['duration_minutes']} min"
 
-                    with ui.row().classes('w-full justify-between items-center mt-2'):
+                with ui.card().classes('list-card w-full p-4'):
+                    with ui.row().classes('w-full items-start justify-between gap-3'):
+                        with ui.column().classes('gap-1'):
+                            ui.label(test['title']).classes('list-card-title')
+                            ui.label(f"{type_label} · {len(test['questions'])} questions · {duration_label}").classes('list-card-meta')
+                        ui.html(f'<span class="{status_class}">{status_text}</span>')
+
+                    with ui.row().classes('w-full justify-between items-center mt-3'):
                         if test["status"] == "draft":
                             ui.button("Open to Students", on_click=lambda tid=test_id: [open_full_test(db, tid), admin_content.refresh(db)]).props('color=primary')
-                        
+
                         elif test["status"] == "open":
-                            col = ui.column()
+                            col = ui.column().classes('gap-1')
                             with col:
                                 if not is_dpp:
                                     remaining = full_test_time_left(db, test_id)
                                     if remaining is not None:
                                         mins = int(remaining // 60)
-                                        ui.label(f"{mins} min remaining on shared clock").classes('text-sm text-gray-500')
-                                
+                                        ui.label(f"{mins} min remaining on shared clock").classes('list-card-meta')
+
                                 close_label = "End Live Session" if not is_dpp else "Close"
-                                ui.button(close_label, on_click=lambda tid=test_id: [close_full_test(db, tid), admin_content.refresh(db)]).props('color=negative')
+                                ui.button(close_label, on_click=lambda tid=test_id: [close_full_test(db, tid), admin_content.refresh(db)]).props('color=negative outline')
 
                         submitted_count = len([s for s in test["submissions"].values() if s.get("best")])
                         attempt_total = sum(s.get("attempt_count", 0) for s in test["submissions"].values())
-                        ui.label(f"{submitted_count} student(s) with a score · {attempt_total} attempt(s) total").classes('text-sm text-gray-500')
+                        ui.label(f"{submitted_count} student(s) with a score · {attempt_total} attempt(s) total").classes('list-card-meta')
 
                     if test["submissions"]:
-                        with ui.expansion("Results (best score per student)").classes('w-full mt-2'):
+                        with ui.expansion("Results (best score per student)").classes('w-full mt-2 app-expansion'):
                             render_full_test_leaderboard(test)
     
     filter_choice.on_value_change(render_list)
@@ -272,12 +322,12 @@ def _render_existing_tests(db):
 
 @ui.refreshable
 def _render_live_quiz_tab(db):
-    ui.label("Live Practice Quiz").classes('text-2xl font-bold')
-    ui.label("Runs in real time with everyone watching the same question at once.").classes('text-sm text-gray-500 mb-4')
+    ui.label("Live Practice Quiz").classes('section-title')
+    ui.label("Runs in real time with everyone watching the same question at once.").classes('section-caption mb-4')
 
     if not db["quiz_state"]["active"]:
-        with ui.card().classes('w-full p-4'):
-            quiz_mode = ui.radio(["Single Question", "Auto Quiz (multiple, timed)", "My Question Bank"], value="Single Question").props('inline')
+        with ui.card().classes('builder-card w-full p-6'):
+            quiz_mode = ui.radio(["Single Question", "Auto Quiz (multiple, timed)", "My Question Bank"], value="Single Question").props('inline').classes('mb-4')
             
             mode_single = ui.column().classes('w-full')
             mode_auto = ui.column().classes('w-full').style('display: none;')
@@ -378,60 +428,67 @@ def _render_active_live_quiz(db):
     qs = db["quiz_state"]
     q_data = qs["question_data"]
 
-    if qs.get("auto_mode"):
-        ui.notify(f"Auto Quiz running — question {qs['current_index']}/{qs['total_questions']}", type="info")
-    else:
-        ui.notify("Live question active.", type="info")
+    with ui.card().classes('builder-card w-full p-6'):
+        status_text = (
+            f"Auto Quiz running — question {qs['current_index']}/{qs['total_questions']}"
+            if qs.get("auto_mode") else "Live question active"
+        )
+        ui.label(status_text).classes('section-caption mb-2')
 
-    if q_data.get("_correction_made"):
-        ui.label("Note: the verification pass corrected this question's answer before it was sent.").classes('text-sm text-gray-500')
+        if q_data.get("_correction_made"):
+            with ui.row().classes('key-warning-banner w-full items-center gap-2 mb-3'):
+                ui.icon('fact_check').classes('text-base')
+                ui.label("The verification pass corrected this question's answer before it was sent.").classes('text-sm')
 
-    safe_question = html_lib.escape(str(q_data["question"]))
-    
-    with ui.row().classes('w-full justify-between items-center mb-4'):
-        ui.html(f"<div class='text-xl font-bold'>{safe_question}</div>")
-        
-        with ui.row().classes('gap-2'):
-            if qs.get("auto_mode"):
-                ui.badge(f"{qs['current_index']}/{qs['total_questions']} Question")
-            if qs.get("timer_seconds") and not qs["revealed"]:
-                remaining = time_left(db)
-                urgent = remaining is not None and remaining <= 10
-                color = "red" if urgent else "blue"
-                ui.badge(f"{int(remaining)}s Remaining").props(f'color={color}')
+        safe_question = html_lib.escape(str(q_data["question"]))
 
-    if not qs["revealed"]:
-        if qs.get("timer_seconds") and is_time_up(db):
-            lock_and_reveal(db)
-            admin_content.refresh(db)
+        with ui.row().classes('w-full justify-between items-start gap-3 mb-4'):
+            ui.html(f"<div class='quiz-live-question'>{safe_question}</div>")
 
-        ui.label(f"{len(qs['answers'])} response(s) received").classes('text-sm text-gray-500')
-        ui.button("Lock & Reveal Answer", on_click=lambda: [lock_and_reveal(db), admin_content.refresh(db)]).props('color=primary')
-    else:
-        ui.notify(f"Correct answer: {q_data['answer']}", type="positive")
-        _render_results_table(qs, q_data, db)
-        ui.separator().classes('my-4')
-        render_leaderboard(db)
+            with ui.row().classes('gap-2 flex-shrink-0'):
+                if qs.get("auto_mode"):
+                    ui.html(f'<span class="status-pill open">{qs["current_index"]}/{qs["total_questions"]}</span>')
+                if qs.get("timer_seconds") and not qs["revealed"]:
+                    remaining = time_left(db)
+                    urgent = remaining is not None and remaining <= 10
+                    pill_class = "status-pill closed" if urgent else "status-pill open"
+                    ui.html(f'<span class="{pill_class}">{int(remaining)}s left</span>')
 
-        if qs.get("auto_mode"):
-            ui.label("Advancing to the next question...").classes('text-sm text-gray-500')
-            
-            async def auto_advance():
-                await asyncio.sleep(2.5)
-                advance_auto_quiz(db)
+        if not qs["revealed"]:
+            if qs.get("timer_seconds") and is_time_up(db):
+                lock_and_reveal(db)
                 admin_content.refresh(db)
-            
-            ui.timer(0.1, auto_advance, once=True)
+
+            ui.label(f"{len(qs['answers'])} response(s) received").classes('list-card-meta mb-3')
+            ui.button("Lock & Reveal Answer", on_click=lambda: [lock_and_reveal(db), admin_content.refresh(db)], icon="lock").props('color=primary')
         else:
-            ui.button("Clear & Return", on_click=lambda: [clear_quiz(db), admin_content.refresh(db)])
+            with ui.row().classes('items-center gap-2 mb-3'):
+                ui.icon('check_circle').classes('text-lg').style('color: var(--success)')
+                ui.label(f"Correct answer: {q_data['answer']}").classes('font-semibold')
+
+            _render_results_table(qs, q_data, db)
+            ui.separator().classes('my-4')
+            render_leaderboard(db)
+
+            if qs.get("auto_mode"):
+                ui.label("Advancing to the next question...").classes('list-card-meta mt-3')
+
+                async def auto_advance():
+                    await asyncio.sleep(2.5)
+                    advance_auto_quiz(db)
+                    admin_content.refresh(db)
+
+                ui.timer(0.1, auto_advance, once=True)
+            else:
+                ui.button("Clear & Return", on_click=lambda: [clear_quiz(db), admin_content.refresh(db)]).props('outline').classes('mt-3')
 
 
 def _render_results_table(qs, q_data, db):
-    ui.label("Results:").classes('font-bold mt-4')
+    ui.label("Results").classes('form-section-title mt-2 mb-2')
     answers = qs.get("answers", {})
     answer_times = qs.get("answer_times", {})
     all_students = [u for u, info in db["users"].items() if info["role"] == "student"]
-    
+
     rows = []
     for student in all_students:
         chosen = answers.get(student)
@@ -445,7 +502,7 @@ def _render_results_table(qs, q_data, db):
                 "Result": "Correct" if correct else "Wrong",
                 "Time": f"{t}s" if t is not None else "—",
             })
-            
+
     if rows:
         columns = [
             {'field': 'Student'},
@@ -453,15 +510,15 @@ def _render_results_table(qs, q_data, db):
             {'field': 'Result'},
             {'field': 'Time'},
         ]
-        ui.aggrid({'columnDefs': columns, 'rowData': rows}).classes('h-64 mt-2')
+        ui.aggrid({'columnDefs': columns, 'rowData': rows}).classes('h-64 mt-2 app-grid')
     else:
-        ui.label("No responses yet.").classes('text-sm text-gray-500')
+        ui.label("No responses yet.").classes('empty-state')
 
 
 @ui.refreshable
 def _render_leaderboard_tab(db):
-    ui.label("Leaderboard").classes('text-2xl font-bold')
-    
+    ui.label("Leaderboard").classes('section-title mb-4')
+
     def reset_scores():
         db["current_session_scores"] = {u: 0 for u in db["users"] if db["users"][u]["role"] == "student"}
         try:
@@ -471,5 +528,5 @@ def _render_leaderboard_tab(db):
         except DatabaseUnavailableError:
             ui.notify("Couldn't save just now — connection hiccup. Please try again.", type="negative")
 
-    ui.button("Reset Today's Session Scores", on_click=reset_scores).classes('mb-4')
+    ui.button("Reset Today's Session Scores", on_click=reset_scores, icon="restart_alt").props('outline').classes('mb-4')
     render_leaderboard(db)
